@@ -1,0 +1,302 @@
+48000Hz -> 1s = 48000 samples (96000 bytes per channel @ 2 bytes/frame)
+One scanline(?) is 400 samples or 8 milliseconds
+first frame starts at 45.594s ends at 51.611s so 6.017s
+
+			// 45.8=start of frame, 46.9=strong edges, 51.611=end of first frame,
+			// 69.60=frame starts out of sync 63.3=false start; 65.63=false start of
+			// frame; 173.25=misaligned frame
+
+
+frame start:
+  falling edge, 11 'bits' (down, up, down) of 24 samples each (0.52083333ms -> 1.92kHz), 
+  then one broken (?) byte with the upper platform longer (34 samples in total, higher amplitude), but next one is shorter
+  then 16 normal bits
+  another higher amplitude bit
+  then 15 normal bits
+  another higher / broken bit
+  then 15 bits
+  another higher bit
+  15 bits
+  higher/longer bit
+  16 bits
+  higher/longer bit
+  14 bits
+  1 short bit merged with
+  1 high bit 
+  15 bits
+  high bit
+  15 bits
+  1 high/long bit
+  16 bits
+  1 high bit
+  14 bits
+  1 short bit merged with
+  1 high bit
+  ..........
+  
+in total 20-21 higher bits
+in the next frame the higher bits are 21
+frame starts after falling edge
+frame preamble is ~8254 samples which is about 20 scanlines, including capacitor discharge is 21 scanlines
+
+first frame scanline starts at 45.767s
+
+end/start of frame is a "high" bit with 5-7 samples width for odd lines, 15-20 samples for even lines
+from end bit falling edge until trough is 36-39 samples (only first frame)
+the most reliable scanline detection should be at the falling edge after the final peak
+
+total frame duration incl. preamble varies quite a bit from 665 scanlines up to 807 (see 7:30.370-7:37:095).
+ -Since a frame is ~204.8kS there is some extra information embedded at the end, signaled by lower peaks
+ -this "whitespace" is the varied length 
+ 
+possible way to detect frame edges: FFT with 1.92Khz BPF, high amplitude, 180ms tone
+
+a 500Hz LPF with 48dB/oct give clean (but rounded) edges
+autocorrelation with 1024 samples gives the highest peak at the scanline interval (~8.3ms)
+- it would also be able to confidently detect preamble 
+
+
+with a moving average (expAvg w=0.05) the peaks of the average coincide with the falling edges
+- amplitude ~+-2000 for the preamble peaks
+- it syncs correctly with the first falling edge on scanline end, amplitude 8000-13000
+
+image skewing upwards = scanline_duration too high (waveform is speeding up)
+
+
+last peak can be used as edge of scanline detection, it occurs at 98.5% (odd) or 95.25% (even) during scanline
+so if we have frameStartTime -> frameStartTime + scanLines * scanLineTime + scanlinePercentage * scanLineTime = currentTime
+
+
+11.10.17 switched to 96kHz
+one frame is 797samples = 8.3ms
+if we process 2048 samples at a time (21.33ms) -> each window has 2.56 peaks
+so we could sort the values, get the highest 10 peaks, use only the ones that are in the top 10% (std dev?)
+for burst preamble, the distance between two high bits is 824 samples (8.58ms)
+theoretically, the scanline end is a hard drive to high, plateau of .38/.1ms, hard drive to low, relax to zero
+
+algorithm: find all hard falling edges, going from above zero, with a peak situated at .09375/.375ms to the left
+a peak is a value that's in the upper 99 percentile
+or get top 20 values (for a scanline), do an average, the peaks should be 10% around that value(?) 
+
+
+empty frame samples:
+[-1294, -1131, -957, -977, -1096, -917, -1114, -746, -923, -756, -1029, -736, -744, -659, -665, -645, -777, -771, -491, -472, -567, -421, -543, -579, -241, -514, -214, -183, -204, -154, -380, -177, -220, -352, -190, -381, -140, -130, -133, -382, -366, -129, -162, -174, -375, -130, -198, -534, -208, -147, -589, -515, -527, -553, -222, -598, -628, -635, -453, -400, -500, -431, -775, -480, -482, -812, -457, -641, -814, -813, -801, -786, -482, -814, -824, -489, -822, -795, -502, -803, -780, -479, -791, -473, -789, -442, -495, -632, -389, -470, -404, -616, -598, -595, -570, -573, -553, -221, -199, -527, -167, -168, -132, -177, -338, -332, -352, -293, -364, -317, -329, -276, -378, -345, -260, -130, 12, -257, -377, -345, -268, -319, -305, -297, -330, 0, -361, -382, -319, -330, -177, -383, -340, -180, -181, -365, -219, -149, -151, -218, -184, -232, -541, -209, -248, -254, -513, -252, -213, -552, -251, -546, -572, -518, -232, -251, -214, -584, -530, -216, -542, -227, -232, -254, -523, -253, -520, -153, -152, -187, -154, -198, -382, -199, -377, -357, -176, -330, -329, -355, -379, -294, -376, -313, -358, -285, -278, -374, -350, -266, 23, -352, -292, -284, -282, -316, 7, -309, -271, -351, 5, -322, -293, -373, -302, 13, -328, -257, -148, -312, -139, -303, -151, -321, -370, -315, -324, -130, -365, -301, -343, -195, -296, -381, -322, -155, -172, -324, -140, -353, -353, -366, -359, -384, -338, -130, -370, -368, -132, -131, -332, -322, -371, -343, -297, -168, -277, -319, -303, 25, -334, 61, -348, 53, -328, 21, 40, -272, 55, -299, 12, -271, 26, -259, 15, 64, -264, 28, 68, 30, 49, 21, 43, 20, 26, 38, -267, 25, 105, 66, 11, 47, 29, 19, 41, 34, -270, 58, 1, -324, 126, -320, 10, 22, -296, 39, -309, 14, -279, 48, -265, -270, 52, 17, -267, -265, 2, 16, -262, 30, 3, -274, 23, -333, 70, -268, 58, -311, 8, 21, 29, 46, 10, -263, 11, 118, 17, 60, 15, -99, -281, 114, 86, 30, -115, 38, 53, 67, 60, 100, 70, 29, -70, 61, 50, 120, 79, 16, 114, 90, 79, 104, 72, 68, 61, 123, 83, 28, 111, 70, 16, -121, 45, -117, 43, 71, 57, 99, 86, -339, -124, 2, 116, 19, 13, 57, 71, 4, 68, 74, -280, 89, 37, 47, -277, 115, 12, 107, 40, 38, 66, 27, 115, 8, 94, -267, 118, 55, 8, 79, 42, 42, 85, 31, 62, 110, 27, 84, 34, -123, 95, 85, 120, 104, -119, 62, -108, 111, 67, -108, 72, 77, -96, 123, 75, -97, 52, 78, -116, 105, 69, 103, -111, 87, 100, 85, 104, 76, 94, -114, 117, 100, -103, 56, 127, 46, 85, 104, 104, 116, 7, -126, 26, 68, 55, 97, 44, 47, 85, 58, 64, 59, 29, 126, 105, 18, 103, 103, 66, 56, 90, 72, 84, 85, 69, 89, 93, 93, 111, -267, 124, 56, 44, 116, 69, 119, 46, 120, 65, 81, -50, 127, 101, 118, 117, 122, 79, -70, 85, 61, 110, 124, 117, 122, -95, 81, 99, 98, 124, 82, 118, -116, 107, -127, 71, 85, 126, 79, 100, 84, 83, -107, 84, 104, -106, 125, 92, 79, -128, 101, -267, 37, 93, 109, 118, 119, 60, 90, 70, 94, 101, 76, 108, 86, -126, 32, -112, 114, 108, 69, 90, -119, 45, 118, 84, 106, 100, -126, 114, 75, 126, 96, 51, -102, 105, 84, 100, 119, 81, 51, -48, 107, 86, -100, 68, -123, 78, -109, 83, -124, 113, 85, 91, 43, 118, 117, 110, 56, 108, 29, 122, -120, 4, 54, 102, 102, 116, 74, 95, 57, 69, 73, 35, 80, 27, 106, 88, 98, 13, 118, -273, 5, 63, -275, 38, 1, 69, -265, 60, -289, 81, 42, -273, 78, 4, 30, 24, 99, 33, 18, 49, 31, 54, 18, 42, 63, 84, 32, 27, -265, 41, 30, 50, 43, 13, 2, 54, 59, 11, 54, -265, -66, -257, 76, -122, 39, 75, 86, 34, 54, 96, 32, 107, 51, 26, 48, 64, -270, 96, -280, 100, 99, -294, 71, 56, 26, 59, 29, 58, 80, -260, 51, 49, 92, 30, 64, 42, 50, 43, 32, 63, -328, 29, 43, 41, -269, -288, 61, 27, -283, 88, -269, 89, 55, -287, 33, 47, 35, 57, 68, 17, 56, 16, 35, 17, 82, 12, 127, -299, -92, -291, -125, -296, 119, 16, 55, 3, -112, 27, 111, 85, 125, -55, 22, 326, -356, 209, -383, 768, -524, 1370, -436, 7903, 13151, 7238, 9214, 7854, 8674, 8292, 8768, 8126, 8570, 8100, 8237, 8211, 7861, 7897, 7635, 8008, 7409, 7782, 7514, 7345, 7114, 7134, 6841, 7221, 6635, 7032, 6372, 6616, 6104, 6377, 6192, 6050, 5905, 5835, 5158, 5662, -2644, -12081, -3948, 652, -1493, -4904, -4031, -2499, -2512, -3319, -3486, -3034, -3037, -3341, -3233, -3047, -3396, -2945, -3385, -2970, -3012, -3195, -2984, -2954, -3199, -3097, -3138, -2813, -3120, -2778, -2811, -2758, -2722, -2915, -2893, -2915, -2868, -2861, -2848, -2850, -2529, -2823, -2465, -2527, -2498, -2478, -2676, -2475, -2629, -2636, -2581, -2649, -2597, -2286, -2296, -2578, -2298, -2210, -2242, -2232, -2421, -2388, -2224, -2322, -2401, -2387, -2393, -2015, -2351, -2334, -2038, -2023, -2008, -2317, -1976, -2025, -1984, -1954, -2105, -1972, -1924, -2125, -2135, -2087, -2163, -2098, -1772, -2055, -1770, -1742, -2074, -1732, -1693, -1742, -1686, -1703, -1720, -1870, -1707, -1883, -1832, -1689, -1864, -1863, -1851, -1857, -1799, -1840, -1522, -1524, -1801, -1465, -1507, -1609, -1436, -1451, -1662, -1646, -1659, -1649, -1620, -1593, -1585, -1586, -1612, -1572, -1544, -1563, -1275, -1611, -1218, -1267, -1269, -1246, -1276, -1260, -1182, -1266, -1227, -1180, -1172, -1213, -1201, -1355, -1172, -1350, -1351, -1350, -1153, -1370, -1159, -1302, -1021, -1397, -1382, -1350, -1327, -1359, -1005, -1022, -1341, -1323, -1310, -979, -978, -1318, -997, -955, -1001, -992, -921, -982, -976, -932, -932, -924, -922, -952, -901, -907, -910, -1135, -1150, -1136, -1139, -904, -1119, -1083, -901, -1078, -1081, -1120, -1090, -764, -1029, -1100, -737, -1026, -1060, -712, -735, -1070, -675, -1036, -718, -725, -697, -700, -731, -650, -719, -698, -725, -651, -722, -881, -663, -877, -644, -701, -652, -666, -830, -684, -790, -652, -799, -841, -815, -870, -785, -845, -791, -849, -695, -479, -867, -809, -867, -490, -834, -849, -497, -814, -850, -445, -488, -478, -772, -463, -794, -492, -440, -819, -635, -493, -415, -485, -415, -419, -512, -632, -415, -455, -427, -626, -451, -404, -396, -619, -410, -417, -575, -408, -539, -548, -589, -567, -583, -552, -515, -389, -562, -250, -578, -249, -622, -224, -581, -521, -515, -526, -232, -601, -226, -559, -253, -219, -553, -233, -534, -249, -144, -540, -218, -191, -203, -249, -156, -212, -256, -140, -252, -172, -562, -179, -183, -225, -228, -140, -165, -251, -182, -182, -176, -202, -159, -143, -131, -180, -374, -173, -361, -369, -168, -146, -370, -338, -376, -138, -363, -349, -375, -330, -356, -324, -152, -346, -341, -332, -341, -319, -322, -146, -268, -282, -327, -314, -297, -283, -268, -314, -268, 14, -277, -298, 39, -356, 30, 45, -294, -259, 8, -295, -260, 123, -345, 33, 21, 42, -263, 10, 0, 16, 27, 7, 31, -269, 58, 20, 42, 20, 57, 63, 8, 37, 62, -320, 41, 13, 39, 63, 15, 23, 63, 60, 18, 96, -274, 70, 25, 87, 22, 72, 84, 45, 92, 60, 82, -265, 90, -125, 52, 79, 120, 48, 101, 79, 51, 118, 86, -118, 66, 87, -111, -124, 121, -128, 121, -123, 126, -128, -85, 124, -69, -89, -124, 90, -39, -69, 104, -74, -112, -68, -9, 114, -71, -106, -77, -29, -128, 272, -117, -113, -89, 106, -58, -115, -71, -52, 78, -20, -126, -62, -83, 21, -56, -111, -79, -97, -98, -99, -55, -48, 124, -72, -76, -65, -81, -122, -58, -88, -70, -12, -67, -44, -23, -103, -51, -34, -94, -46, -34, -30, -50, -68, -46, 284, -47, -39, -30, -34, -81, 281, -84, 267, -21, -64, 341, -63, 315, -34, 300, 280, 274, 289, -42, 274, 275, 259, 320, -44, -28, 277, 277, 273, 279, 335, -47, 275, 264, 297, -35, 259, 302, 279, 281, -27, 306, -59, 295, 306, -37, -2, 321, -54, -34, -45, 271, 258, -6, -2, -44, -3, -20, 293, -19, 294, -7, 258, 299, 263, 320, 289, -6, -58, 265, 306, -7, 258, 319, 279, -66, 302, -5, 292, -27, 277, 285, 354, 276, -56, 301, -19, 337, 293, 333, -12, 366, -14, 345, 279, 323, 318, -38, 361, -7, 144, -16, 317, 323, 319, -10, 359, 264, 279, 380, 285, 308, 282, 335, 294, 315, 283, 325, 283, 320, 314, 308, 325, -8, 302, 333, 256, 316, 279, -85, 298, -7, 315, 283, -48, 319, 274, 285, 275, -28, -14, -4, 310, -34, 277, 281, -51, 268, 292, -27, 280, 269, 301, 297, -61, 290, 269, 274, -22, -33, 294, -2, 323, -39, 313, -33, -15, 366, -115, 145, 325, 278, 314, 265, 330, 295, 350, -23, 336, 262, 335, 360, -13, 363, 277, 290, 346, 277, 289, 304, 313, 340, 273, 293, 304, 303, 309, 316, 257, 319, 339, -17, 323, 321, 322, 263, 318, 285, 381, -22, 257, 304, -52, 294, 266, 290, -22, 307, 302, 314, 256, 326, -6, 306, -1, 289, 342, -25, 298, 293, 263, 294, 296, 261, -10, 291, 329, 267, 285, 274, 314, -49, 352, 259, 275, -14, 302, -22, 310, -39, 179, -19, 301, 349, 288, 339, 270, 376, -23, 131, -10, 224, 125, 221, -106, 232, -86, 572, -107, 503, 106, 985, 88, 4952, 14188, 7931, 8871, 8706, 8386, 8590, 8112, 8572, 7635, 6913, -6018, -6807, 1971, 2758, -668, -2399, -746, -64, -521, -1289, -1096, -477, -840, -728, -694, -660, -680, -869, -664, -1026, -818, -675, -646, -668, -850, -684, -885, -648, -641, -848, -883, -806, -894, -793, -873, -848, -832, -852, -866, -787, -778, -852, -469, -852, -793, -494, -458, -448, -487, -473, -462, -496, -774, -392, -497, -403, -487, -450, -640, -785, -415, -411, -454, -416, -425, -632, -394, -389, -391, -477, -627, -401, -621, -622, -600, -390, -585, -631, -406, -248, -402, -577, -415, -550, -623, -552, -633, -399, -553, -400, -602, -563, -612, -614, -539, -402, -237, -628, -570, -519, -598, -554, -514, -540, -550, -252, -598, -242, -570, -241, -584, -245, -541, -254, -240, -574, -179, -533, -224, -544, -232, -521, -244, -227, -519, -518, -189, -165, -226, -159, -228, -186, -153, -193, -220, -155, -197, -185, -167, -179, -218, -165, -371, -215, -169, -146, -210, -337, -179, -142, -369, -172, -383, -145, -133, -359, -177, -373, -381, -139, -138, -136, -148, -383, -380, -206, -321, -181, -159, -145, -160, -189, -155, -350, -203, -327, -162, -218, -338, -198, -352, -335, -199, -157, -357, -142, -346, -130, -157, -381, -195, -352, -139, -164, -360, -374, -153, -374, -379, -376, -162, -340, -368, -131, -372, -320, -143, -353, 4, -352, -319, -138, -296, -336, -326, -364, -296, -135, -375, -276, -379, -346, -321, -333, -342, 22, -345, -344, -316, -308, -314, -334, -279, -331, -337, -334, -307, -276, -325, 8, -288, -321, -262, -311, -309, -258, -274, -344, -384, -270, -328, -274, -332, -374, -284, -287, -322, -302, -280, -383, -288, -287, -290, -299, 12, -...
+
+
+
+
+
+
+
+File exists:true
+PCM_SIGNED 48000.0 Hz, 16 bit, mono, 2 bytes/frame, little-endian
+clean start of frame at 45.788125s
+clean start of frame at 51.81066666666667s
+New frame 1 at 51.81066666666667 s
+saved frame 1
+clean start of frame at 57.934020833333335s
+New frame 2 at 57.934020833333335 s
+saved frame 2
+clean start of frame at 63.859875s
+New frame 3 at 63.859875 s
+saved frame 3
+clean start of frame at 65.63335416666666s
+clean start of frame at 69.69985416666667s
+New frame 4 at 69.69985416666667 s
+saved frame 4
+New frame 5 at 75.5479375 s
+saved frame 5
+clean start of frame at 81.2238125s
+New frame 6 at 81.2238125 s
+saved frame 6
+clean start of frame at 86.70414583333333s
+New frame 7 at 86.70414583333333 s
+saved frame 7
+clean start of frame at 92.19675s
+New frame 8 at 92.19675 s
+saved frame 8
+New frame 9 at 97.73395833333333 s
+saved frame 9
+! exceeded frame duration at 104.83902083333334 s853 lines
+New frame 10 at 104.83902083333334 s
+saved frame 10
+clean start of frame at 110.60525s
+New frame 11 at 110.60525 s
+saved frame 11
+clean start of frame at 116.54958333333333s
+New frame 12 at 116.54958333333333 s
+saved frame 12
+clean start of frame at 122.4668125s
+New frame 13 at 122.4668125 s
+saved frame 13
+clean start of frame at 128.11591666666666s
+New frame 14 at 128.11591666666666 s
+saved frame 14
+New frame 15 at 133.87366666666668 s
+saved frame 15
+clean start of frame at 139.46466666666666s
+New frame 16 at 139.46466666666666 s
+saved frame 16
+clean start of frame at 144.86427083333334s
+New frame 17 at 144.86427083333334 s
+saved frame 17
+clean start of frame at 150.56577083333335s
+New frame 18 at 150.56577083333335 s
+saved frame 18
+New frame 19 at 156.39914583333334 s
+saved frame 19
+New frame 20 at 161.86260416666667 s
+saved frame 20
+clean start of frame at 167.523625s
+New frame 21 at 167.523625 s
+saved frame 21
+clean start of frame at 173.2564375s
+New frame 22 at 173.2564375 s
+saved frame 22
+clean start of frame at 179.36247916666667s
+New frame 23 at 179.36247916666667 s
+saved frame 23
+clean start of frame at 185.15722916666667s
+New frame 24 at 185.15722916666667 s
+saved frame 24
+clean start of frame at 190.85475s
+New frame 25 at 190.85475 s
+saved frame 25
+New frame 26 at 196.54966666666667 s
+saved frame 26
+clean start of frame at 202.3826875s
+New frame 27 at 202.3826875 s
+saved frame 27
+clean start of frame at 207.97266666666667s
+New frame 28 at 207.97266666666667 s
+saved frame 28
+New frame 29 at 213.76652083333335 s
+saved frame 29
+New frame 30 at 219.61033333333333 s
+saved frame 30
+New frame 31 at 225.095125 s
+saved frame 31
+New frame 32 at 231.31977083333334 s
+saved frame 32
+clean start of frame at 237.19620833333335s
+New frame 33 at 237.19620833333335 s
+saved frame 33
+New frame 34 at 242.97352083333334 s
+saved frame 34
+clean start of frame at 248.76222916666666s
+New frame 35 at 248.76222916666666 s
+saved frame 35
+New frame 36 at 254.55022916666667 s
+saved frame 36
+clean start of frame at 260.2564791666667s
+New frame 37 at 260.2564791666667 s
+saved frame 37
+New frame 38 at 266.4572708333333 s
+saved frame 38
+clean start of frame at 272.11752083333334s
+New frame 39 at 272.11752083333334 s
+saved frame 39
+clean start of frame at 277.9825625s
+New frame 40 at 277.9825625 s
+saved frame 40
+clean start of frame at 283.79297916666667s
+New frame 41 at 283.79297916666667 s
+saved frame 41
+clean start of frame at 289.61525s
+New frame 42 at 289.61525 s
+saved frame 42
+clean start of frame at 295.4783541666667s
+New frame 43 at 295.4783541666667 s
+saved frame 43
+clean start of frame at 301.34464583333335s
+New frame 44 at 301.34464583333335 s
+saved frame 44
+New frame 45 at 307.22291666666666 s
+saved frame 45
+New frame 46 at 313.10939583333334 s
+saved frame 46
+clean start of frame at 318.6670625s
+New frame 47 at 318.6670625 s
+saved frame 47
+clean start of frame at 324.40622916666666s
+New frame 48 at 324.40622916666666 s
+saved frame 48
+New frame 49 at 330.19910416666664 s
+saved frame 49
+New frame 50 at 336.0644375 s
+saved frame 50
+clean start of frame at 341.96325s
+New frame 51 at 341.96325 s
+saved frame 51
+clean start of frame at 347.5456458333333s
+New frame 52 at 347.5456458333333 s
+saved frame 52
+New frame 53 at 353.2421458333333 s
+saved frame 53
+New frame 54 at 358.83289583333334 s
+saved frame 54
+clean start of frame at 364.4922916666667s
+New frame 55 at 364.4922916666667 s
+saved frame 55
+New frame 56 at 370.24002083333335 s
+saved frame 56
+New frame 57 at 375.89370833333334 s
+saved frame 57
+clean start of frame at 381.5814375s
+New frame 58 at 381.5814375 s
+saved frame 58
+clean start of frame at 387.3658125s
+New frame 59 at 387.3658125 s
+saved frame 59
+New frame 60 at 392.85791666666665 s
+saved frame 60
+clean start of frame at 398.5364583333333s
+New frame 61 at 398.5364583333333 s
+saved frame 61
+clean start of frame at 404.1032083333333s
+New frame 62 at 404.1032083333333 s
+saved frame 62
+New frame 63 at 409.8986875 s
+saved frame 63
+clean start of frame at 415.7545416666667s
+New frame 64 at 415.7545416666667 s
+saved frame 64
+clean start of frame at 421.6206666666667s
+New frame 65 at 421.6206666666667 s
+saved frame 65
+New frame 66 at 427.20004166666666 s
+saved frame 66
+clean start of frame at 433.123125s
+New frame 67 at 433.123125 s
+saved frame 67
+clean start of frame at 438.62195833333334s
+New frame 68 at 438.62195833333334 s
+saved frame 68
+clean start of frame at 444.57852083333336s
+New frame 69 at 444.57852083333336 s
+saved frame 69
+clean start of frame at 450.5661666666667s
+New frame 70 at 450.5661666666667 s
+saved frame 70
+clean start of frame at 457.29547916666667s
+! exceeded frame duration at 457.29547916666667 s809 lines
+New frame 71 at 457.29547916666667 s
+saved frame 71
+clean start of frame at 462.8009583333333s
+New frame 72 at 462.8009583333333 s
+saved frame 72
+clean start of frame at 468.6159583333333s
+New frame 73 at 468.6159583333333 s
+saved frame 73
+clean start of frame at 474.1485416666667s
+New frame 74 at 474.1485416666667 s
+saved frame 74
+New frame 75 at 479.77120833333333 s
+saved frame 75
+clean start of frame at 485.4093125s
+New frame 76 at 485.4093125 s
+saved frame 76
+New frame 77 at 491.6958333333333 s
+saved frame 77
+Done 24000512 frames
+saved frame 78
